@@ -10,13 +10,23 @@ export async function login(formData: FormData) {
   const email = formData.get('email') as string
   const password = formData.get('password') as string
 
+  if (!email || !password) {
+    redirect('/login?error=Please fill in all fields')
+  }
+
   const { error } = await supabase.auth.signInWithPassword({
     email,
     password,
   })
 
   if (error) {
-    return redirect(`/login?error=${encodeURIComponent(error.message)}`)
+    let friendlyError = error.message
+    if (error.message.toLowerCase().includes('invalid login credentials')) {
+      friendlyError = 'Incorrect email or password. Please try again.'
+    } else if (error.message.toLowerCase().includes('email not confirmed')) {
+      friendlyError = 'Please verify your email address before signing in.'
+    }
+    redirect(`/login?error=${encodeURIComponent(friendlyError)}`)
   }
 
   revalidatePath('/', 'layout')
@@ -28,31 +38,49 @@ export async function signup(formData: FormData) {
 
   const email = formData.get('email') as string
   const password = formData.get('password') as string
-  const username = (formData.get('username') as string).trim().toLowerCase()
   const fullName = formData.get('full_name') as string
+  const username = formData.get('username') as string
 
-  // Simple validation to ensure username doesn't contain spaces
-if (!username || /\s/.test(username)) {
-  return redirect(`/login?error=${encodeURIComponent('Username must not contain spaces')}`)
-}
+  if (!email || !password || !fullName || !username) {
+    redirect('/login?error=Please fill in all fields')
+  }
 
-  const { error } = await supabase.auth.signUp({
+  const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
       data: {
-        username,
         full_name: fullName,
+        username: username.toLowerCase().trim(),
       },
     },
   })
 
   if (error) {
-    return redirect(`/login?error=${encodeURIComponent(error.message)}`)
+    redirect(`/login?error=${encodeURIComponent(error.message)}`)
   }
 
-  // Instruct user to verify email
-return redirect(`/login?message=${encodeURIComponent('Check your email to verify your account')}`)}
+  // Supabase Auth returns an empty identities list when email is already registered
+  if (data?.user?.identities && data.user.identities.length === 0) {
+    redirect(
+      `/login?error=${encodeURIComponent(
+        'An account with this email already exists. Please sign in instead.'
+      )}`
+    )
+  }
+
+  // Check if session exists (e.g. Email confirmation disabled in Supabase)
+  if (data?.session) {
+    revalidatePath('/', 'layout')
+    redirect('/chat')
+  }
+
+  redirect(
+    `/login?message=${encodeURIComponent(
+      'Account created! Check your email to confirm your account or sign in.'
+    )}`
+  )
+}
 
 export async function signout() {
   const supabase = await createClient()
